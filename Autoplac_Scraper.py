@@ -106,7 +106,7 @@ def extract_autoplac_list(driver):
             unique_cars.append(c)
     return unique_cars
 
-# --- TO JEST PRZYWRÓCONA TWOJA STARA FUNKCJA PARSUJĄCA ---
+# TO JEST FUNKCJA PARSUJĄCA
 def parse_offer_details(driver, url, marka_default, model_default):
     details = {
         'Marka pojazdu': marka_default.capitalize(),
@@ -314,7 +314,7 @@ def main():
                     'nr_rejestracyjny': full_data['Ma numer rejestracyjny']
                 }
                 
-                # --- DEBUG ---
+                # DEBUG
                 # print(json.dumps(oferta_do_bazy, indent=4, ensure_ascii=False))
                 
                 db.upsert_oferta(oferta_do_bazy)
