@@ -42,5 +42,37 @@ SAMOCHODY = {
             "3": {"nazwa": "Klasa E", "slug_oto": "e-klasa", "slug_auto": "klasa-e"},
             "4": {"nazwa": "GLE", "slug_oto": "gle", "slug_auto": "gle"}
         }
+    },
+    "4": {
+        "marka": "skoda", 
+        "nazwa": "Skoda",
+        "modele": {
+
+            "1": {"nazwa": "Kamiq", "slug_oto": "kamiq", "slug_auto": "kamiq"},
+            "2": {"nazwa": "Karoq", "slug_oto": "karoq", "slug_auto": "karoq"},
+            "3": {"nazwa": "Kodiaq", "slug_oto": "kodiaq", "slug_auto": "kodiaq"},
+            "4": {"nazwa": "Octavia", "slug_oto": "octavia", "slug_auto": "octavia"},
+            "5": {"nazwa": "Scala", "slug_oto": "scala", "slug_auto": "scala"},
+            "6": {"nazwa": "Superb", "slug_oto": "superb", "slug_auto": "superb"},
+            "7": {"nazwa": "Fabia", "slug_oto": "fabia", "slug_auto": "fabia"},
+            "8": {"nazwa": "Enyaq", "slug_oto": "enyaq", "slug_auto": "enyaq"},
+            "9": {"nazwa": "Roomster", "slug_oto": "roomster", "slug_auto": "roomster"}
+        }
+    },
+    "5": {
+    "marka": "honda", 
+    "nazwa": "Honda",
+    "modele": {
+
+        "1": {"nazwa": "Accord", "slug_oto": "accord", "slug_auto": "accord"},
+        "2": {"nazwa": "Civic", "slug_oto": "civic", "slug_auto": "civic"},
+        "3": {"nazwa": "Kodiaq", "slug_oto": "kodiaq", "slug_auto": "kodiaq"},
+        "4": {"nazwa": "CR-V", "slug_oto": "cr-v", "slug_auto": "cr-v"},
+        "5": {"nazwa": "HR-V", "slug_oto": "hr-v", "slug_auto": "hr-v"},
+        "6": {"nazwa": "ZR-V", "slug_oto": "zr-v", "slug_auto": "zr-v"},
+        "7": {"nazwa": "Odyssey", "slug_oto": "odyssey", "slug_auto": "odyssey"},
+        "8": {"nazwa": "Jazz", "slug_oto": "jazz", "slug_auto": "jazz"}
     }
+}
+    
 }
