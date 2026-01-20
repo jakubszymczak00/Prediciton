@@ -12,16 +12,13 @@ from utils.network import retry
 from utils.logger import log
 
 def close_cookies(driver):
-    """Agresywnie zamyka banery cookies/RODO na Autoplac"""
     try:
-        # Szukamy przyciskow typu "Akceptuje", "Zgadzam sie" itp.
         buttons = driver.find_elements(By.TAG_NAME, "button")
         for btn in buttons:
             txt = btn.text.lower()
             if "akceptuję" in txt or "zgadzam" in txt or "przejdź" in txt:
                 try:
                     driver.execute_script("arguments[0].click();", btn)
-                    log.info("🍪 Zamknięto baner cookies.")
                     time.sleep(1)
                     return
                 except: pass
@@ -32,7 +29,6 @@ def extract_links(driver):
     soup = BeautifulSoup(driver.page_source, 'html.parser')
     links = set()
     found_any = False
-    # Szukamy linkow w kafelkach ofert
     for a in soup.find_all('a', href=True):
         if '/oferta/' in a['href']:
             found_any = True
@@ -42,7 +38,6 @@ def extract_links(driver):
 
 @retry(max_retries=2, delay=1)
 def parse_details(driver, url, marka, model):
-    # Domyslny obiekt, zeby nie wywalalo bledu przy braku danych
     details = {
         'Marka pojazdu': marka.capitalize(), 
         'Model pojazdu': model.replace('-', ' ').title(),
@@ -53,7 +48,6 @@ def parse_details(driver, url, marka, model):
     
     soup = BeautifulSoup(driver.page_source, 'html.parser')
     
-    # 1. CENA
     found_price = None
     for script in soup.find_all('script', {'type': 'application/ld+json'}):
         try:
@@ -73,11 +67,9 @@ def parse_details(driver, url, marka, model):
         
     details['Cena'] = found_price
 
-    # 2. DATA AKTUALIZACJI
     m_date = re.search(r'aktualizacja.*?(\d{4}-\d{2}-\d{2})', soup.get_text(), re.IGNORECASE)
     if m_date: details['Data_Aktualizacji'] = m_date.group(1)
 
-    # 3. PARAMETRY
     params = {}
     for item in soup.find_all(['li', 'div']):
         txt = item.get_text(separator="|", strip=True)
@@ -98,7 +90,6 @@ def parse_details(driver, url, marka, model):
     if 'Zarejestrowany w Polsce' not in details and details.get('Ma numer rejestracyjny'):
         details['Zarejestrowany w Polsce'] = 'Tak'
 
-    # 4. NOWE DANE (DASHBOARD)
     try:
         if 'lokalizacja' in params:
             loc_parts = params['lokalizacja'].split(',')
@@ -128,42 +119,33 @@ def parse_details(driver, url, marka, model):
 
 def run_autoplac_scraper(driver, db, stats, marka, model_slug, model_nazwa):
     damage_param = "&damagedVehicles=false" if TYLKO_NIEUSZKODZONE else ""
-    # Dodajemy parametr sortowania (np. najnowsze), czasem pomaga na paginacje
     url = f"https://autoplac.pl/oferty/samochody-osobowe/{marka}/{model_slug}?yearFrom={ROK_OD}{damage_param}&order=1"
     
     log.info(f"Autoplac start: {marka} {model_nazwa}")
     page = 1
     
     while True:
-        log.info(f"Autoplac strona {page}...")
+        log.info(f"Autoplac page {page}...")
         try:
             full_url = f"{url}&p={page}"
             driver.get(full_url)
-            
-            # 1. Zamykamy cookies (TO JEST KLUCZOWE)
             close_cookies(driver)
-            
-            # 2. Czekamy na cokolwiek (nie tylko linki), zeby nie timeoutowac zbyt szybko
             WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-            
         except TimeoutException:
-            log.warning("Autoplac wolno dziala, ale probuje czytac dalej...")
+            log.warning("Autoplac timeout, retrying...")
             
         links = extract_links(driver)
         if not links:
-            # Sprawdzenie czy to nie blad ladowania - proba scrolla
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             time.sleep(2)
             links = extract_links(driver)
-            
             if not links:
-                log.info(f"Brak ofert na stronie {page}. Koniec modelu {model_nazwa}.")
+                log.info(f"No more offers on page {page}. Finished model {model_nazwa}.")
                 break
             
-        log.info(f"Znaleziono {len(links)} ofert na stronie {page}.")
+        log.info(f"Found {len(links)} offers on page {page}.")
             
         for link in links:
-            # Wchodzimy w oferte
             driver.get(link)
             try: WebDriverWait(driver, 3).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
             except: pass
@@ -201,14 +183,14 @@ def run_autoplac_scraper(driver, db, stats, marka, model_slug, model_nazwa):
             
             if status == "INSERT":
                 stats.add_new()
-                log.info(f"➕ [NOWE] {db_data['cena']} PLN")
+                log.info(f"New: {db_data['cena']} PLN")
             elif status == "UPDATE_PRICE":
                 stats.add_price_change()
-                log.info(f"💰 [ZMIANA] {db_data['cena']} PLN")
+                log.info(f"Price update: {db_data['cena']} PLN")
             elif status == "SEEN":
-                # stats.add_seen() - nie spamujemy logow
-                pass
+                stats.add_seen() 
+                log.info(f"Seen: {db_data['cena']} PLN") 
             
             stats.add_processed()
             
-        page += 1 # Przechodzimy do nastepnej strony
+        page += 1

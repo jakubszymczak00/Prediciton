@@ -13,8 +13,6 @@ from utils.logger import log
 
 @retry(max_retries=3, delay=3)
 def extract_list_json(driver):
-    # Pobieramy dane bezposrednio z silnika strony (Next.js)
-    # To omija blokady i przyspiesza dzialanie 30-krotnie
     script = """
     try { 
         const json = JSON.parse(document.getElementById('__NEXT_DATA__').innerText); 
@@ -26,7 +24,6 @@ def extract_list_json(driver):
         return []
 
     results = []
-    # Przeszukujemy cache w poszukiwaniu ofert
     for key, value in urql_cache.items():
         try:
             data = json.loads(value['data'])
@@ -41,7 +38,6 @@ def extract_list_json(driver):
 
 @retry(max_retries=2, delay=1)
 def parse_html_description_only(driver):
-    # Ta funkcja uruchamia sie TYLKO dla nowych aut lub przy zmianie ceny
     try:
         soup = BeautifulSoup(driver.page_source, 'html.parser')
         desc_div = soup.find('div', {'data-testid': 'content-description-section'})
@@ -61,30 +57,27 @@ def run_otomoto_scraper(driver, db, stats, marka, model_slug, model_nazwa):
     while True:
         separator = "&" if "?" in base_url else "?"
         current_url = f"{base_url}{separator}page={page}"
-        log.info(f"Otomoto strona {page}...")
+        log.info(f"Otomoto page {page}...")
         
         try:
             driver.get(current_url)
-            # Czekamy na JSON (szybsze niz ladowanie obrazkow)
             WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "__NEXT_DATA__")))
         except TimeoutException:
-            log.warning("Timeout strony listy (Otomoto).")
+            log.warning("Otomoto timeout.")
             break
         
         items = extract_list_json(driver)
         if not items:
-            log.info("Brak ofert lub koniec stron.")
+            log.info("No items found or end of pages.")
             break
             
         for item in items:
             node = item.get('node') or item
             link = node.get('url')
             
-            # 1. Pobieramy dane z listy (SZYBKA SCIEZKA)
             try: price_val = float(node['price']['amount']['value'])
             except: price_val = 0
             
-            # Nowe pola do Dashboardu
             loc_city = node.get('location', {}).get('city', {}).get('name', 'Nieznane')
             loc_region = node.get('location', {}).get('region', {}).get('name', 'Nieznane')
             
@@ -97,7 +90,6 @@ def run_otomoto_scraper(driver, db, stats, marka, model_slug, model_nazwa):
             seller_type_raw = node.get('seller', {}).get('type', '')
             seller_type = "Dealer" if seller_type_raw == 'business' else "Prywatny"
 
-            # Dane techniczne
             c = {'Rok': 0, 'Przebieg': 0, 'Pojemnosc': 0, 'Moc': 0, 'Paliwo': '', 'Generacja': ''}
             params = node.get('parameters', [])
             for p in params:
@@ -109,7 +101,6 @@ def run_otomoto_scraper(driver, db, stats, marka, model_slug, model_nazwa):
                 elif k == 'fuel_type': c['Paliwo'] = dv
                 elif k == 'generation': c['Generacja'] = dv
 
-            # Obiekt do bazy
             db_data = {
                 'url': link, 
                 'platforma': 'otomoto',
@@ -123,45 +114,39 @@ def run_otomoto_scraper(driver, db, stats, marka, model_slug, model_nazwa):
                 'paliwo': c['Paliwo'], 
                 'pojemnosc': clean_int(c['Pojemnosc']),
                 'moc': clean_int(c['Moc']),
-                
-                # Nowe kolumny (wypełnione z JSON!)
                 'miasto': loc_city,
                 'wojewodztwo': loc_region,
                 'typ_sprzedawcy': seller_type,
                 'liczba_zdjec': images_count,
                 'liczba_opcji': equip_count,
                 'wyposazenie': equip_str,
-                'opis': '' # Opis uzupelnimy nizej tylko w razie potrzeby
+                'opis': '' 
             }
             
-            # 2. LOGIKA AKTUALIZACJI
-            # Funkcja upsert sprawdza, czy cena sie zmienila.
             status = db.upsert_oferta(db_data)
             
             if status == "INSERT" or status == "UPDATE_PRICE":
-                # Jesli to nowe auto LUB cena sie zmienila -> wchodzimy pobrac opis
-                if status == "UPDATE_PRICE":
-                    log.info(f"💰 [ZMIANA CENY] {db_data['cena']} PLN")
-                else:
-                    log.info(f"➕ [NOWE] {db_data['cena']} PLN")
-
                 driver.get(link)
                 try: WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
                 except: pass
                 
                 db_data['opis'] = parse_html_description_only(driver)
-                db.upsert_oferta(db_data) # Zapisujemy ponownie z opisem
+                db.upsert_oferta(db_data) 
                 
-                if status == "INSERT": stats.add_new()
-                else: stats.add_price_change()
+                if status == "INSERT":
+                    stats.add_new()
+                    log.info(f"New: {db_data['cena']} PLN")
+                else:
+                    stats.add_price_change()
+                    log.info(f"Price update: {db_data['cena']} PLN")
             
             elif status == "SEEN":
-                # Jesli auto jest w bazie i cena TA SAMA -> nie robimy nic (oszczednosc czasu)
                 stats.add_seen()
+                # log.info(f"Seen: {db_data['cena']} PLN") # Opcjonalnie, jesli chcesz widziec kazde
             
             elif status == "ERROR":
                 stats.add_error()
-                log.error(f"Blad zapisu: {link}")
+                log.error(f"Save error: {link}")
             
             stats.add_processed()
             

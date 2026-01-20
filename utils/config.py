@@ -12,12 +12,13 @@ SAMOCHODY = {
         "modele": {
             "1": {"nazwa": "Seria 1", "slug_oto": "seria-1", "slug_auto": "seria-1"},
             "2": {"nazwa": "Seria 3", "slug_oto": "seria-3", "slug_auto": "seria-3"},
-            "3": {"nazwa": "Seria 5", "slug_oto": "seria-5", "slug_auto": "seria-5"},
-            "4": {"nazwa": "Seria 7", "slug_oto": "seria-7", "slug_auto": "seria-7"},
-            "5": {"nazwa": "X1", "slug_oto": "x1", "slug_auto": "x1"},
-            "6": {"nazwa": "X3", "slug_oto": "x3", "slug_auto": "x3"},
-            "7": {"nazwa": "X5", "slug_oto": "x5", "slug_auto": "x5"},
-            "8": {"nazwa": "X6", "slug_oto": "x6", "slug_auto": "x6"}
+            "3": {"nazwa": "Seria 4", "slug_oto": "seria-4", "slug_auto": "seria-4"},
+            "4": {"nazwa": "Seria 5", "slug_oto": "seria-5", "slug_auto": "seria-5"},
+            "5": {"nazwa": "Seria 7", "slug_oto": "seria-7", "slug_auto": "seria-7"},
+            "6": {"nazwa": "X1", "slug_oto": "x1", "slug_auto": "x1"},
+            "7": {"nazwa": "X3", "slug_oto": "x3", "slug_auto": "x3"},
+            "8": {"nazwa": "X5", "slug_oto": "x5", "slug_auto": "x5"},
+            "9": {"nazwa": "X6", "slug_oto": "x6", "slug_auto": "x6"}
         }
     },
     "2": {

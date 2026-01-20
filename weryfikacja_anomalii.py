@@ -1,138 +1,141 @@
 import sqlite3
 import time
 import re
+import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
 from bs4 import BeautifulSoup
 
 # KONFIGURACJA
 DB_NAME = "baza_pojazdow.db"
-PROG_CENOWY = 400000  # Sprawdzamy wszystko powyżej tej kwoty
+CENA_MIN_ANOMALIA = 400000  # Sprawdzamy ceny powyżej tej kwoty
+ROK_MIN = 2017              # Usuwamy wszystko starsze niż to
+ROK_MAX = datetime.date.today().year + 1 # Usuwamy błędy typu rok 2999 (obecny rok + 1 na zapas)
+
+def usun_bledne_roczniki():
+    """
+    Krok 1: Błyskawiczne czyszczenie bazy z aut spoza zakresu lat.
+    Nie wymaga Selenium, działa bezpośrednio na SQL.
+    """
+    print(f"🧹 KROK 1: Czyszczenie roczników (Zakres: {ROK_MIN} - {ROK_MAX})...")
+    
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    
+    # Sprawdzamy ile tego jest przed usunięciem
+    c.execute(f"SELECT COUNT(*) FROM oferty WHERE rocznik < {ROK_MIN} OR rocznik > {ROK_MAX}")
+    ilosc = c.fetchone()[0]
+    
+    if ilosc > 0:
+        print(f"   Znaleziono {ilosc} ofert ze złym rocznikiem. Usuwam...")
+        c.execute(f"DELETE FROM oferty WHERE rocznik < {ROK_MIN} OR rocznik > {ROK_MAX}")
+        conn.commit()
+        print(f"   ✅ Usunięto {ilosc} rekordów.")
+    else:
+        print("   ✅ Roczniki w porządku. Brak ofert do usunięcia.")
+        
+    conn.close()
 
 def setup_driver():
     options = Options()
     # options.add_argument("--headless") # Odkomentuj, jeśli nie chcesz widzieć okna
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    # Blokowanie obrazków przyspiesza weryfikację
     prefs = {"profile.managed_default_content_settings.images": 2}
     options.add_experimental_option("prefs", prefs)
     driver = webdriver.Chrome(options=options)
     return driver
 
 def pobierz_cene_ze_strony(driver, url):
-    """
-    Probuje wyciagnac cene ze strony.
-    Zwraca (int) cene lub None jesli nie znaleziono/ogloszenie nieaktywne.
-    """
     try:
         driver.get(url)
-        time.sleep(2) # Krotka pauza na zaladowanie JS
+        time.sleep(2)
         
         page_source = driver.page_source.lower()
         
-        # 1. Sprawdzenie czy ogłoszenie wygasło (Otomoto/Autoplac)
+        # 404 Check
         if "nie jest już dostępne" in page_source or "ogłoszenie zakończone" in page_source or "błąd 404" in driver.title.lower():
             return None
 
         soup = BeautifulSoup(driver.page_source, 'html.parser')
         text = soup.get_text()
 
-        # 2. Specyficzne szukanie ceny (bardziej restrykcyjne niz scraper)
-        # Szukamy cyfr w poblizu slowa "PLN" lub "zł", unikajac nr telefonu
-        
-        # Metoda Regex dla Otomoto/Autoplac
-        # Szuka ciagow typu: 45 900 PLN, 1.200.000 zł
         matches = re.findall(r'(\d[\d\s\.]*)\s*(?:PLN|zł)', text)
-        
         candidates = []
         for m in matches:
-            # Czyscimy spacje i kropki
             clean = re.sub(r'[^\d]', '', m)
             if clean:
                 val = int(clean)
-                # Odrzucamy liczby za male (np "1 PLN") i numery telefonow (zazwyczaj 9 cyfr, > 10mln)
                 if 1000 < val < 10000000:
                     candidates.append(val)
         
         if candidates:
-            # Zazwyczaj cena to najwieksza liczba na stronie (ale mniejsza niz nr telefonu)
-            # Lub pierwsza znaleziona w sekcji ceny. Bierzemy max z sensownego zakresu.
             return max(candidates)
             
     except Exception as e:
-        print(f"Blad podczas weryfikacji URL: {e}")
+        print(f"Blad URL: {e}")
         return None
-        
     return None
 
-def napraw_baze():
+def napraw_ceny_anomalii():
+    """
+    Krok 2: Sprawdzanie aut z podejrzanie wysoką ceną.
+    """
+    print(f"\n🔍 KROK 2: Weryfikacja cen powyżej {CENA_MIN_ANOMALIA} PLN...")
+    
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     
-    # 1. Pobieramy podejrzane rekordy
-    query = f"SELECT id, url, cena, marka, model FROM oferty WHERE cena > {PROG_CENOWY}"
+    query = f"SELECT id, url, cena, marka, model FROM oferty WHERE cena > {CENA_MIN_ANOMALIA}"
     c.execute(query)
     podejrzane = c.fetchall()
     
     if not podejrzane:
-        print(f"✅ Brak aut powyżej {PROG_CENOWY} PLN. Baza czysta.")
+        print("   ✅ Brak cenowych anomalii. Baza czysta.")
+        conn.close()
         return
 
-    print(f"🔍 Znaleziono {len(podejrzane)} podejrzanych ofert (> {PROG_CENOWY} PLN). Rozpoczynam weryfikację...")
+    print(f"   Znaleziono {len(podejrzane)} podejrzanych ofert. Uruchamiam przeglądarkę...")
     
     driver = setup_driver()
-    usuniete = 0
-    poprawione = 0
-    potwierdzone = 0
+    stat_usuniete = 0
+    stat_poprawione = 0
+    stat_ok = 0
     
     try:
         for row in podejrzane:
             db_id, url, stara_cena, marka, model = row
-            
-            print(f"\nSprawdzam ID {db_id}: {marka} {model} (Baza: {stara_cena} PLN)")
+            print(f"   Sprawdzam: {marka} {model} (Baza: {stara_cena} PLN)...")
             
             nowa_cena = pobierz_cene_ze_strony(driver, url)
             
             if nowa_cena is None:
-                # Ogloszenie nie istnieje -> USUWAMY
-                print(f"❌ Ogłoszenie nieaktywne lub błąd 404. Usuwam z bazy.")
+                print(f"     ❌ Ogłoszenie nieaktywne -> USUWANIE")
                 c.execute("DELETE FROM oferty WHERE id = ?", (db_id,))
-                usuniete += 1
-                
+                stat_usuniete += 1
             elif nowa_cena != stara_cena:
-                # Cena jest inna -> AKTUALIZUJEMY
-                if nowa_cena < PROG_CENOWY:
-                    print(f"📉 Znaleziono błąd! Nowa cena to {nowa_cena} PLN (było {stara_cena}). Aktualizuję.")
-                    c.execute("UPDATE oferty SET cena = ? WHERE id = ?", (nowa_cena, db_id))
-                    poprawione += 1
-                else:
-                    # Cena nadal wysoka, ale inna
-                    print(f"🔄 Cena zmieniona na {nowa_cena} PLN (nadal wysoka). Aktualizuję.")
-                    c.execute("UPDATE oferty SET cena = ? WHERE id = ?", (nowa_cena, db_id))
-                    poprawione += 1
-            
+                print(f"     📉 Korekta ceny: {stara_cena} -> {nowa_cena} PLN")
+                c.execute("UPDATE oferty SET cena = ? WHERE id = ?", (nowa_cena, db_id))
+                stat_poprawione += 1
             else:
-                # Cena taka sama -> PRAWDZIWE LUKSUSOWE AUTO?
-                print(f"💎 Cena potwierdzona ({nowa_cena} PLN). To prawdopodobnie luksusowe auto.")
-                potwierdzone += 1
+                print(f"     💎 Cena potwierdzona.")
+                stat_ok += 1
                 
-            conn.commit() # Zapisujemy po kazdym kroku
+            conn.commit()
             
     except KeyboardInterrupt:
-        print("\nPrzerwano przez użytkownika.")
+        print("\nPrzerwano.")
     finally:
         driver.quit()
         conn.close()
         
-    print("\n" + "="*40)
-    print(f"RAPORT KOŃCOWY:")
-    print(f"🗑️ Usunięto (nieaktywne): {usuniete}")
-    print(f"🔧 Naprawiono ceny:      {poprawione}")
-    print(f"💎 Potwierdzono (drogie): {potwierdzone}")
-    print("="*40)
-    print("💡 Pamiętaj uruchomić 'export_to_csv.py' aby zobaczyć zmiany w dashboardzie!")
+    print(f"\nRAPORT: Usunięto: {stat_usuniete} | Poprawiono: {stat_poprawione} | Potwierdzono: {stat_ok}")
 
 if __name__ == "__main__":
-    napraw_baze()
+    # Najpierw szybkie czyszczenie roczników
+    usun_bledne_roczniki()
+    
+    # Potem wolna weryfikacja cen
+    napraw_ceny_anomalii()
+    
+    print("\n💡 Pamiętaj uruchomić 'export_to_csv.py' po zakończeniu!")
