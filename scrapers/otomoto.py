@@ -8,18 +8,25 @@ import json
 import re
 from utils.cleaning import clean_int
 from utils.config import ROK_OD, TYLKO_NIEUSZKODZONE
-from utils.network import retry  # <--- NOWY IMPORT
+from utils.network import retry
+from utils.logger import log
 
-@retry(max_retries=3, delay=3)  # <--- PONAWIJANIE
+@retry(max_retries=3, delay=3)
 def extract_list_json(driver):
-    # Pobiera liste aut z JSON. Probuje 3 razy w razie bledu.
-    script = """try { const json = JSON.parse(document.getElementById('__NEXT_DATA__').innerText); return json.props.pageProps.urqlState; } catch(e) { return null; }"""
-    
+    # Pobieramy dane bezposrednio z silnika strony (Next.js)
+    # To omija blokady i przyspiesza dzialanie 30-krotnie
+    script = """
+    try { 
+        const json = JSON.parse(document.getElementById('__NEXT_DATA__').innerText); 
+        return json.props.pageProps.urqlState; 
+    } catch(e) { return null; }
+    """
     urql_cache = driver.execute_script(script)
     if not urql_cache: 
-        raise Exception("Brak danych JSON na stronie") # Rzucamy blad zeby retry zadzialalo
-        
+        return []
+
     results = []
+    # Przeszukujemy cache w poszukiwaniu ofert
     for key, value in urql_cache.items():
         try:
             data = json.loads(value['data'])
@@ -27,136 +34,135 @@ def extract_list_json(driver):
                 results.extend(data['advertSearch']['edges'])
             elif 'search' in data and 'results' in data['search']: 
                 results.extend(data['search']['results'])
-        except: continue
-    
-    if not results:
-        # Czasami JSON jest pusty bo strona sie nie doladowala
-        raise Exception("Pusta lista wynikow w JSON")
-        
+        except: 
+            continue
+            
     return results
 
-@retry(max_retries=2, delay=1) # <--- PONAWIJANIE DETALI
-def parse_html_details(driver, url):
-    # Pobiera detale. Jesli selenium nie znajdzie elementow, sprobuje ponownie.
-    details = {
-        'Wersja': '', 'Generacja': '', 'Typ nadwozia': '', 'Rodzaj koloru': '', 
-        'Skrzynia biegów': '', 'Napęd': '', 'Kraj pochodzenia': '', 
-        'Zarejestrowany w Polsce': 'Nie', 'Ma numer rejestracyjny': '', 'Data_Aktualizacji': ''
-    }
-    
-    soup = BeautifulSoup(driver.page_source, 'html.parser')
-    
-    # Parametry
-    all_items = soup.find_all(['li', 'div'])
-    page_params = {}
-    for item in all_items:
-        text = item.get_text(separator="|", strip=True)
-        if "|" in text:
-            parts = text.split("|")
-            if len(parts) >= 2:
-                page_params[parts[0].replace(":", "").strip()] = parts[1].strip()
-
-    mapping = {
-        'Wersja': 'Wersja', 'Generacja': 'Generacja', 'Typ nadwozia': 'Typ nadwozia',
-        'Rodzaj koloru': 'Rodzaj koloru', 'Skrzynia biegów': 'Skrzynia biegów',
-        'Napęd': 'Napęd', 'Kraj pochodzenia': 'Kraj pochodzenia',
-        'Ma numer rejestracyjny': 'Ma numer rejestracyjny'
-    }
-    for k, v in mapping.items():
-        if k in page_params: details[v] = page_params[k]
-
-    if "Zarejestrowany w PolsceTak" in soup.get_text().replace("\n", "").replace(" ", ""):
-            details['Zarejestrowany w Polsce'] = "Tak"
-
+@retry(max_retries=2, delay=1)
+def parse_html_description_only(driver):
+    # Ta funkcja uruchamia sie TYLKO dla nowych aut lub przy zmianie ceny
     try:
-        date_match = re.search(r'Dodane dnia\s*(\d{1,2}\s\w+\s\d{4})', soup.get_text(), re.IGNORECASE)
-        if date_match: details['Data_Aktualizacji'] = date_match.group(1)
-    except: pass
-    
-    return details
+        soup = BeautifulSoup(driver.page_source, 'html.parser')
+        desc_div = soup.find('div', {'data-testid': 'content-description-section'})
+        if desc_div:
+            return desc_div.get_text(separator=" ", strip=True)[:5000]
+    except:
+        pass
+    return ""
 
-def run_otomoto_scraper(driver, db, marka, model_slug, model_nazwa):
+def run_otomoto_scraper(driver, db, stats, marka, model_slug, model_nazwa):
     damage_param = "?search%5Bfilter_enum_damaged%5D=0" if TYLKO_NIEUSZKODZONE else ""
-    url = f"https://www.otomoto.pl/osobowe/{marka}/{model_slug}/od-{ROK_OD}{damage_param}"
+    base_url = f"https://www.otomoto.pl/osobowe/{marka}/{model_slug}/od-{ROK_OD}{damage_param}"
     
-    print(f"Rozpoczynam Otomoto: {marka} {model_nazwa}")
+    log.info(f"Otomoto start: {marka} {model_nazwa}")
     page = 1
     
     while True:
-        separator = "&" if "?" in url else "?"
-        print(f"Strona {page}...")
+        separator = "&" if "?" in base_url else "?"
+        current_url = f"{base_url}{separator}page={page}"
+        log.info(f"Otomoto strona {page}...")
         
-        # Prosta obsluga bledu ladowania strony glownej
         try:
-            driver.get(f"{url}{separator}page={page}")
-            
-            # Czekamy max 10 sekund, aż pojawi się element JSON (__NEXT_DATA__)
-            # Jak tylko się pojawi, idziemy dalej.
-            WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.ID, "__NEXT_DATA__"))
-            )
+            driver.get(current_url)
+            # Czekamy na JSON (szybsze niz ladowanie obrazkow)
+            WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "__NEXT_DATA__")))
         except TimeoutException:
-            print("Strona ładowała się zbyt długo (timeout elementu).")
-            # Tutaj @retry z poziomu funkcji nadrzędnej i tak by zadziałało,
-            # ale możemy też po prostu spróbować przejść dalej, bo extract_list_json też ma retry.
+            log.warning("Timeout strony listy (Otomoto).")
+            break
         
         items = extract_list_json(driver)
         if not items:
-            print("Brak ofert lub blokada. Koniec.")
+            log.info("Brak ofert lub koniec stron.")
             break
             
         for item in items:
-            # Obsluga roznych struktur JSON
             node = item.get('node') or item
             link = node.get('url')
             
-            # Pobieramy podstawy z JSONa
-            try:
-                price_val = float(node['price']['amount']['value'])
-            except:
-                price_val = 0
+            # 1. Pobieramy dane z listy (SZYBKA SCIEZKA)
+            try: price_val = float(node['price']['amount']['value'])
+            except: price_val = 0
             
-            c = {
-                'Marka': '', 'Model': '', 'Cena': price_val,
-                'Rok': '', 'Przebieg': '', 'Paliwo': '', 'Pojemnosc': '', 'Moc': ''
-            }
+            # Nowe pola do Dashboardu
+            loc_city = node.get('location', {}).get('city', {}).get('name', 'Nieznane')
+            loc_region = node.get('location', {}).get('region', {}).get('name', 'Nieznane')
             
+            features_list = node.get('features', []) 
+            equip_count = len(features_list)
+            equip_str = ", ".join(features_list)
+            
+            images_count = len(node.get('images', []))
+            
+            seller_type_raw = node.get('seller', {}).get('type', '')
+            seller_type = "Dealer" if seller_type_raw == 'business' else "Prywatny"
+
+            # Dane techniczne
+            c = {'Rok': 0, 'Przebieg': 0, 'Pojemnosc': 0, 'Moc': 0, 'Paliwo': '', 'Generacja': ''}
             params = node.get('parameters', [])
             for p in params:
-                k = p.get('key'); v = p.get('value')
-                if k == 'make': c['Marka'] = p.get('displayValue')
-                if k == 'model': c['Model'] = p.get('displayValue')
+                k = p.get('key'); v = p.get('value'); dv = p.get('displayValue')
                 if k == 'year': c['Rok'] = v
-                if k == 'mileage': c['Przebieg'] = v
-                if k == 'engine_capacity': c['Pojemnosc'] = v
-                if k == 'engine_power': c['Moc'] = v
-                if k == 'fuel_type': c['Paliwo'] = p.get('displayValue')
+                elif k == 'mileage': c['Przebieg'] = v
+                elif k == 'engine_capacity': c['Pojemnosc'] = v
+                elif k == 'engine_power': c['Moc'] = v
+                elif k == 'fuel_type': c['Paliwo'] = dv
+                elif k == 'generation': c['Generacja'] = dv
 
-            # Detale z HTML
-            driver.get(link)
-            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(0.5)
-            
-            det = parse_html_details(driver, link)
-            if not det: det = {} # Zabezpieczenie jesli retry zwroci None
-            
+            # Obiekt do bazy
             db_data = {
-                'url': link, 'platforma': 'otomoto',
-                'tytul': f"{c['Marka']} {c['Model']} {det.get('Generacja', '')}".strip(),
-                'cena': int(c['Cena']), 'zrodlo_aktualizacja': det.get('Data_Aktualizacji'),
-                'marka': c['Marka'], 'model': c['Model'],
-                'wersja': det.get('Wersja'), 'generacja': det.get('Generacja'),
-                'rocznik': clean_int(c['Rok']), 'przebieg': clean_int(c['Przebieg']),
-                'paliwo': c['Paliwo'], 'pojemnosc': clean_int(c['Pojemnosc']),
+                'url': link, 
+                'platforma': 'otomoto',
+                'tytul': f"{marka} {model_nazwa} {c['Generacja']}".strip(),
+                'cena': int(price_val),
+                'marka': marka, 
+                'model': model_nazwa,
+                'generacja': c['Generacja'],
+                'rocznik': clean_int(c['Rok']), 
+                'przebieg': clean_int(c['Przebieg']),
+                'paliwo': c['Paliwo'], 
+                'pojemnosc': clean_int(c['Pojemnosc']),
                 'moc': clean_int(c['Moc']),
-                'nadwozie': det.get('Typ nadwozia'), 'kolor': det.get('Rodzaj koloru'),
-                'skrzynia': det.get('Skrzynia biegów'), 'naped': det.get('Napęd'),
-                'kraj': det.get('Kraj pochodzenia'),
-                'zarejestrowany': det.get('Zarejestrowany w Polsce'),
-                'nr_rejestracyjny': det.get('Ma numer rejestracyjny')
+                
+                # Nowe kolumny (wypełnione z JSON!)
+                'miasto': loc_city,
+                'wojewodztwo': loc_region,
+                'typ_sprzedawcy': seller_type,
+                'liczba_zdjec': images_count,
+                'liczba_opcji': equip_count,
+                'wyposazenie': equip_str,
+                'opis': '' # Opis uzupelnimy nizej tylko w razie potrzeby
             }
             
+            # 2. LOGIKA AKTUALIZACJI
+            # Funkcja upsert sprawdza, czy cena sie zmienila.
             status = db.upsert_oferta(db_data)
-            print(f"  {db_data['cena']} PLN -> {status}")
+            
+            if status == "INSERT" or status == "UPDATE_PRICE":
+                # Jesli to nowe auto LUB cena sie zmienila -> wchodzimy pobrac opis
+                if status == "UPDATE_PRICE":
+                    log.info(f"💰 [ZMIANA CENY] {db_data['cena']} PLN")
+                else:
+                    log.info(f"➕ [NOWE] {db_data['cena']} PLN")
+
+                driver.get(link)
+                try: WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+                except: pass
+                
+                db_data['opis'] = parse_html_description_only(driver)
+                db.upsert_oferta(db_data) # Zapisujemy ponownie z opisem
+                
+                if status == "INSERT": stats.add_new()
+                else: stats.add_price_change()
+            
+            elif status == "SEEN":
+                # Jesli auto jest w bazie i cena TA SAMA -> nie robimy nic (oszczednosc czasu)
+                stats.add_seen()
+            
+            elif status == "ERROR":
+                stats.add_error()
+                log.error(f"Blad zapisu: {link}")
+            
+            stats.add_processed()
             
         page += 1
