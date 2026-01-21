@@ -1,5 +1,6 @@
 # Konfiguracja filtrowania
-ROK_OD = 2017
+ROK_OD_OSOBOWE = 2017
+ROK_OD_DOSTAWCZE = 2012
 TYLKO_NIEUSZKODZONE = True
 
 # Slownik marek i modeli
@@ -61,19 +62,79 @@ SAMOCHODY = {
         }
     },
     "5": {
-    "marka": "honda", 
-    "nazwa": "Honda",
-    "modele": {
+        "marka": "honda", 
+        "nazwa": "Honda",
+        "modele": {
 
-        "1": {"nazwa": "Accord", "slug_oto": "accord", "slug_auto": "accord"},
-        "2": {"nazwa": "Civic", "slug_oto": "civic", "slug_auto": "civic"},
-        "3": {"nazwa": "Kodiaq", "slug_oto": "kodiaq", "slug_auto": "kodiaq"},
-        "4": {"nazwa": "CR-V", "slug_oto": "cr-v", "slug_auto": "cr-v"},
-        "5": {"nazwa": "HR-V", "slug_oto": "hr-v", "slug_auto": "hr-v"},
-        "6": {"nazwa": "ZR-V", "slug_oto": "zr-v", "slug_auto": "zr-v"},
-        "7": {"nazwa": "Odyssey", "slug_oto": "odyssey", "slug_auto": "odyssey"},
-        "8": {"nazwa": "Jazz", "slug_oto": "jazz", "slug_auto": "jazz"}
+            "1": {"nazwa": "Accord", "slug_oto": "accord", "slug_auto": "accord"},
+            "2": {"nazwa": "Civic", "slug_oto": "civic", "slug_auto": "civic"},
+            "3": {"nazwa": "Kodiaq", "slug_oto": "kodiaq", "slug_auto": "kodiaq"},
+            "4": {"nazwa": "CR-V", "slug_oto": "cr-v", "slug_auto": "cr-v"},
+            "5": {"nazwa": "HR-V", "slug_oto": "hr-v", "slug_auto": "hr-v"},
+            "6": {"nazwa": "ZR-V", "slug_oto": "zr-v", "slug_auto": "zr-v"},
+            "7": {"nazwa": "Odyssey", "slug_oto": "odyssey", "slug_auto": "odyssey"},
+            "8": {"nazwa": "Jazz", "slug_oto": "jazz", "slug_auto": "jazz"}
+        }    
+    },
+    "6": {
+        "marka": "toyota", 
+        "nazwa": "Toyota",
+        "modele": {
+            "1": {"nazwa": "Yaris", "slug_oto": "yaris", "slug_auto": "yaris"},
+            "2": {"nazwa": "Corolla", "slug_oto": "corolla", "slug_auto": "corolla"},
+            "3": {"nazwa": "Auris", "slug_oto": "auris", "slug_auto": "auris"},
+            "4": {"nazwa": "Avensis", "slug_oto": "avensis", "slug_auto": "avensis"},
+            "5": {"nazwa": "Camry", "slug_oto": "camry", "slug_auto": "camry"},
+            "6": {"nazwa": "RAV4", "slug_oto": "rav4", "slug_auto": "rav4"},
+            "7": {"nazwa": "C-HR", "slug_oto": "c-hr", "slug_auto": "c-hr"},
+            "8": {"nazwa": "Aygo", "slug_oto": "aygo", "slug_auto": "aygo"},
+            "9": {"nazwa": "Prius", "slug_oto": "prius", "slug_auto": "prius"},
+            "10": {"nazwa": "Land Cruiser", "slug_oto": "land-cruiser", "slug_auto": "land-cruiser"},
+            "11": {"nazwa": "Highlander", "slug_oto": "highlander", "slug_auto": "highlander"}
+        }
     }
 }
-    
+DOSTAWCZE = {
+    "1": {
+        "marka": "renault", "nazwa": "Renault",
+        "modele": {
+            "1": {"nazwa": "Master", "slug_oto": "master", "slug_auto": "master"},
+            "2": {"nazwa": "Trafic", "slug_oto": "trafic", "slug_auto": "trafic"}
+        }
+    },
+    "2": {
+        "marka": "fiat", "nazwa": "Fiat",
+        "modele": {
+            "1": {"nazwa": "Ducato", "slug_oto": "ducato", "slug_auto": "ducato"},
+            "2": {"nazwa": "Doblo", "slug_oto": "doblo", "slug_auto": "doblo"}
+        }
+    },
+    "3": {
+        "marka": "iveco", "nazwa": "Iveco",
+        "modele": {
+            "1": {"nazwa": "Daily", "slug_oto": "daily", "slug_auto": "daily"}
+        }
+    },
+    "4": {
+        "marka": "mercedes-benz", "nazwa": "Mercedes-Benz",
+        "modele": {
+            "1": {"nazwa": "Sprinter", "slug_oto": "sprinter", "slug_auto": "sprinter"},
+            "2": {"nazwa": "Vito", "slug_oto": "vito", "slug_auto": "vito"}
+        }
+    },
+    "5": {
+        "marka": "volkswagen", "nazwa": "Volkswagen",
+        "modele": {
+            "1": {"nazwa": "Crafter", "slug_oto": "crafter", "slug_auto": "crafter"},
+            "2": {"nazwa": "Transporter", "slug_oto": "transporter", "slug_auto": "transporter"},
+            "3": {"nazwa": "Caddy", "slug_oto": "caddy", "slug_auto": "caddy"}
+        }
+    },
+     "6": {
+        "marka": "ford", "nazwa": "Ford",
+        "modele": {
+            "1": {"nazwa": "Transit", "slug_oto": "transit", "slug_auto": "transit"},
+            "2": {"nazwa": "Transit Custom", "slug_oto": "transit-custom", "slug_auto": "transit-custom"}
+        }
+    }
 }
