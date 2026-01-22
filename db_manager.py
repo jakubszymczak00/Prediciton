@@ -4,13 +4,13 @@ from datetime import datetime
 class BazaDanych:
     def __init__(self, nazwa_pliku="baza_pojazdow.db"):
         self.nazwa_pliku = nazwa_pliku
+        # Otwieramy połączenie RAZ i trzymamy je otwarte
+        self.conn = sqlite3.connect(self.nazwa_pliku, check_same_thread=False)
+        self.cursor = self.conn.cursor()
         self.stworz_tabele()
 
     def stworz_tabele(self):
-        conn = sqlite3.connect(self.nazwa_pliku)
-        c = conn.cursor()
-        
-        c.execute('''
+        self.cursor.execute('''
             CREATE TABLE IF NOT EXISTS oferty (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 url TEXT UNIQUE,
@@ -36,7 +36,7 @@ class BazaDanych:
             )
         ''')
         
-        c.execute('''
+        self.cursor.execute('''
             CREATE TABLE IF NOT EXISTS historia_cen (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 oferta_id INTEGER,
@@ -46,22 +46,21 @@ class BazaDanych:
                 FOREIGN KEY(oferta_id) REFERENCES oferty(id)
             )
         ''')
-        conn.commit()
-        conn.close()
+        self.conn.commit()
+        # WAŻNE: Nie zamykamy tutaj połączenia!
 
     def upsert_oferta(self, dane):
-        conn = sqlite3.connect(self.nazwa_pliku)
-        c = conn.cursor()
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         status = "ERROR"
 
         try:
-            c.execute("SELECT id, cena FROM oferty WHERE url = ?", (dane['url'],))
-            row = c.fetchone()
+            # Używamy self.cursor zamiast tworzyć nowy
+            self.cursor.execute("SELECT id, cena FROM oferty WHERE url = ?", (dane['url'],))
+            row = self.cursor.fetchone()
 
             if row is None:
-                # INSERT (Nowa oferta)
-                c.execute('''
+                # --- INSERT (Nowa oferta) ---
+                self.cursor.execute('''
                     INSERT INTO oferty (
                         url, platforma, tytul, cena, przebieg, rocznik,
                         kategoria, marka, model, wersja, generacja, paliwo, pojemnosc, moc,
@@ -81,28 +80,33 @@ class BazaDanych:
                     dane.get('liczba_zdjec'), dane.get('liczba_opcji'), dane.get('wyposazenie'), dane.get('opis'),
                     dane.get('zrodlo_aktualizacja', ''), now, now, now, now
                 ))
-                new_id = c.lastrowid
-                c.execute("INSERT INTO historia_cen (oferta_id, cena, przebieg, data_zmiany) VALUES (?, ?, ?, ?)",
-                          (new_id, dane.get('cena'), dane.get('przebieg'), now))
+                new_id = self.cursor.lastrowid
+                
+                # Zapisz cenę początkową w historii
+                self.cursor.execute("INSERT INTO historia_cen (oferta_id, cena, przebieg, data_zmiany) VALUES (?, ?, ?, ?)",
+                                  (new_id, dane.get('cena'), dane.get('przebieg'), now))
                 status = "INSERT"
             else:
+                # --- UPDATE (Istniejąca oferta) ---
                 db_id, old_cena = row
-                c.execute("UPDATE oferty SET last_seen = ?, is_active = 1 WHERE id = ?", (now, db_id))
+                
+                # Zawsze odświeżamy last_seen
+                self.cursor.execute("UPDATE oferty SET last_seen = ?, is_active = 1 WHERE id = ?", (now, db_id))
                 status = "SEEN"
 
+                # Jeśli cena się zmieniła
                 if old_cena != dane['cena']:
-                    c.execute("INSERT INTO historia_cen (oferta_id, cena, przebieg, data_zmiany) VALUES (?, ?, ?, ?)",
-                              (db_id, dane['cena'], dane['przebieg'], now))
+                    self.cursor.execute("INSERT INTO historia_cen (oferta_id, cena, przebieg, data_zmiany) VALUES (?, ?, ?, ?)",
+                                      (db_id, dane['cena'], dane['przebieg'], now))
                     status = "UPDATE_PRICE"
 
-                # UPDATE (Aktualizacja danych - TU BYŁ BŁĄD, brakowało pól technicznych)
-                c.execute('''
+                # WAŻNE: Aktualizujemy też dane techniczne (bo scraper mógł wejść w szczegóły i znaleźć generację)
+                self.cursor.execute('''
                     UPDATE oferty SET 
                         cena = ?, przebieg = ?, rocznik = ?, tytul = ?, kategoria = ?,
                         miasto = ?, wojewodztwo = ?, typ_sprzedawcy = ?,
                         liczba_zdjec = ?, liczba_opcji = ?, wyposazenie = ?, opis = ?,
                         
-                        -- Poprawione: Aktualizujemy tez dane techniczne, bo moga dojsc ze szczegolow
                         marka = ?, model = ?, wersja = ?, generacja = ?,
                         paliwo = ?, pojemnosc = ?, moc = ?,
                         nadwozie = ?, kolor = ?, skrzynia = ?, naped = ?,
@@ -115,7 +119,6 @@ class BazaDanych:
                     dane.get('miasto'), dane.get('wojewodztwo'), dane.get('typ_sprzedawcy'),
                     dane.get('liczba_zdjec'), dane.get('liczba_opcji'), dane.get('wyposazenie'), dane.get('opis'),
                     
-                    # Nowe pola w UPDATE
                     dane.get('marka'), dane.get('model'), dane.get('wersja'), dane.get('generacja'),
                     dane.get('paliwo'), dane.get('pojemnosc'), dane.get('moc'),
                     dane.get('nadwozie'), dane.get('kolor'), dane.get('skrzynia'), dane.get('naped'),
@@ -124,32 +127,26 @@ class BazaDanych:
                     dane.get('zrodlo_aktualizacja'), now, db_id
                 ))
 
-            conn.commit()
+            self.conn.commit()
         except Exception as e:
             print(f"Blad SQL: {e}")
             status = "ERROR"
-        finally:
-            conn.close()
+        
         return status
 
     def oznacz_zakonczone_oferty(self):
-        conn = sqlite3.connect(self.nazwa_pliku)
-        c = conn.cursor()
-        c.execute('''
+        self.cursor.execute('''
             UPDATE oferty 
             SET is_active = 0 
             WHERE is_active = 1 
             AND (julianday('now') - julianday(last_seen)) > 1.0
         ''')
-        count = c.rowcount
-        conn.commit()
-        conn.close()
+        count = self.cursor.rowcount
+        self.conn.commit()
         return count
 
-    def sprawdz_cene_przed_zmiana(self, url):
-        conn = sqlite3.connect(self.nazwa_pliku)
-        c = conn.cursor()
-        c.execute("SELECT cena FROM oferty WHERE url = ?", (url,))
-        wynik = c.fetchone()
-        conn.close()
-        return wynik[0] if wynik else None 
+    # --- TEGO BRAKOWAŁO: ---
+    def close(self):
+        """Bezpiecznie zamyka połączenie z bazą."""
+        if self.conn:
+            self.conn.close()
