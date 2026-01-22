@@ -1,0 +1,73 @@
+(function() {
+    console.clear();
+    console.log("%c 🕵️ OTOMOTO DEEP SCAN (Dostawcze) ", "background: #e30000; color: white; font-size: 16px; padding: 8px; font-weight: bold;");
+
+    try {
+        const raw = document.getElementById('__NEXT_DATA__').innerText;
+        const json = JSON.parse(raw);
+        const advert = json?.props?.pageProps?.advert;
+
+        if (!advert) {
+            console.error("❌ Nie znaleziono danych oferty! (Czy to na pewno strona ogłoszenia?)");
+            return;
+        }
+
+        // 1. GŁÓWNE ATRYBUTY
+        console.group("1. Główne Pola (Root)");
+        console.log("Tytuł:", advert.title);
+        console.log("ID:", advert.id);
+        console.log("Kategoria:", advert.category?.name);
+        console.groupEnd();
+
+        // 2. PARAMETRY (To nas najbardziej interesuje)
+        console.group("2. Lista Parametrów (Klucz -> Wartość)");
+        
+        const params = advert.details || advert.parameters || [];
+        const tableData = [];
+
+        // Szukamy specyficznych kluczy
+        let foundBody = false;
+        let foundDrive = false;
+        let foundGen = false;
+        let foundVer = false;
+
+        params.forEach(p => {
+            tableData.push({
+                "Klucz (key)": p.key,
+                "Etykieta (label)": p.label,
+                "Wartość (value)": p.value,
+                "Display Value": p.displayValue
+            });
+
+            if (p.key === 'body_type') foundBody = true;
+            if (p.key === 'transmission' || p.key === 'drive') foundDrive = true;
+            if (p.key === 'generation') foundGen = true;
+            if (p.key === 'version') foundVer = true;
+        });
+
+        console.table(tableData);
+        console.groupEnd();
+
+        // 3. RAPORT BRAKÓW
+        console.group("3. Raport Braków");
+        console.log(foundBody ? "✅ Nadwozie (body_type): JEST" : "❌ Nadwozie (body_type): BRAK w parametrach");
+        console.log(foundDrive ? "✅ Napęd (drive/transmission): JEST" : "❌ Napęd: BRAK w parametrach");
+        console.log(foundGen ? "✅ Generacja: JEST" : "⚠️ Generacja: BRAK (Typowe dla dostawczych)");
+        console.log(foundVer ? "✅ Wersja: JEST" : "⚠️ Wersja: BRAK (Typowe dla dostawczych)");
+        console.groupEnd();
+
+        // 4. EKSPLORACJA HTML (Jeśli brak w JSON)
+        console.group("4. Co widać wizualnie (HTML)?");
+        const listItems = document.querySelectorAll('li');
+        listItems.forEach(li => {
+            const txt = li.innerText;
+            if (txt.includes("Nadwozie") || txt.includes("Napęd") || txt.includes("Generacja") || txt.includes("Wersja")) {
+                console.log(`👁️ Widoczne na stronie: "${txt.replace(/\n/g, ': ')}"`);
+            }
+        });
+        console.groupEnd();
+
+    } catch (e) {
+        console.error("Błąd krytyczny skryptu:", e);
+    }
+})();

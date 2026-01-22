@@ -7,6 +7,7 @@ import time
 import re
 import json
 from utils.cleaning import clean_int
+from utils.mapper import get_generation_by_year
 from utils.config import TYLKO_NIEUSZKODZONE
 try:
     from utils.config import ROK_OD_DOSTAWCZE
@@ -29,42 +30,24 @@ def close_cookies(driver):
 
 @retry(max_retries=3, delay=2)
 def extract_links(driver, szukana_marka):
-    """
-    Pobiera linki do ofert, filtrując te, które nie pasują do szukanej marki.
-    """
     soup = BeautifulSoup(driver.page_source, 'html.parser')
     links = set()
-    
-    # Normalizacja marki do szukania w URL (np. 'Mercedes-Benz' -> 'mercedes')
-    marka_slug = szukana_marka.lower().split()[0] 
+    # Uproszczenie: szukamy po prostu linków ofertowych, filtr marki zrobimy później
     
     for a in soup.find_all('a', href=True):
         href = a['href']
-        # Musi być to link do oferty
         if '/oferta/' in href:
             full_url = href if href.startswith('http') else f"https://autoplac.pl{href}"
-            
-            # FILTR BEZPIECZEŃSTWA: Sprawdzamy czy marka (lub jej część) jest w URLu.
-            # To eliminuje "Proponowane Volvo" gdy szukamy Iveco.
-            if marka_slug in full_url.lower():
-                links.add(full_url)
-            
+            links.add(full_url)
     return list(links)
 
 def parse_brand_model_from_url(url):
-    """
-    Próbuje wyciągnąć markę i model z URL.
-    Formaty bywają różne: /oferta/marka/model/.. lub /oferta/marka-model-...
-    """
     try:
-        # Typowy format: autoplac.pl/oferta/volkswagen/transporter/
         parts = url.split('/oferta/')
         if len(parts) > 1:
             path = parts[1]
             segments = path.split('/')
-            
             if len(segments) >= 2:
-                # Segment 0 to marka, Segment 1 to model
                 marka = segments[0].replace('-', ' ').title()
                 model = segments[1].replace('-', ' ').title()
                 return marka, model
@@ -77,42 +60,47 @@ def parse_details(driver, url):
         'Cena': None, 'Data_Aktualizacji': '', 'Rok produkcji': None,
         'Miasto': '', 'Wojewodztwo': '', 'Typ_Sprzedawcy': 'Prywatny', 
         'Liczba_Zdjec': 0, 'Liczba_Opcji': 0, 'Wyposazenie': '', 'Opis': '',
-        'Tytul_H1': ''
+        'Tytul_H1': '', 'wersja': '', 'generacja': '', 'naped': ''
     }
     
     soup = BeautifulSoup(driver.page_source, 'html.parser')
-    
-    # Tytuł
     h1 = soup.find('h1')
     if h1: details['Tytul_H1'] = h1.get_text(strip=True)
 
-    # Cena
+    # 1. PARSOWANIE JSON-LD
     found_price = None
     for script in soup.find_all('script', {'type': 'application/ld+json'}):
         try:
             d = json.loads(script.string)
             if isinstance(d, list): d = d[0]
+            
             if 'offers' in d and 'price' in d['offers']:
                 found_price = int(float(d['offers']['price']))
-                break
+
+            if 'driveWheelConfiguration' in d:
+                drive = d['driveWheelConfiguration'].lower()
+                if "przedni" in drive or "front" in drive: details['naped'] = "Na przednie koła"
+                elif "tyln" in drive or "rear" in drive: details['naped'] = "Na tylne koła"
+                elif "4x4" in drive: details['naped'] = "4x4"
+                else: details['naped'] = d['driveWheelConfiguration']
+            
+            if 'vehicleTransmission' in d and 'gearbox' not in d['vehicleTransmission'].lower():
+                details['skrzynia'] = d['vehicleTransmission']
         except: pass
         
     if not found_price:
         txt = soup.get_text()
         matches = re.findall(r'(\d[\d\s]*)\s*(?:zł|PLN)', txt)
         nums = [int(re.sub(r'\D', '', m)) for m in matches if re.sub(r'\D', '', m)]
-        valid = [n for n in nums if 1000 < n < 5000000]
+        valid = [n for n in nums if 1000 < n < 5000000] # Cena między 1000 a 5mln
         if valid: found_price = max(valid)
         
     details['Cena'] = found_price
-
-    # Data
     m_date = re.search(r'aktualizacja.*?(\d{4}-\d{2}-\d{2})', soup.get_text(), re.IGNORECASE)
     if m_date: details['Data_Aktualizacji'] = m_date.group(1)
 
-    # Parametry
+    # 2. PARSOWANIE HTML (Parametry)
     params = {}
-    # Szukamy par klucz-wartość w elementach listy i divach
     for item in soup.find_all(['li', 'div', 'p']):
         txt = item.get_text(separator="|", strip=True)
         if "|" in txt:
@@ -123,63 +111,89 @@ def parse_details(driver, url):
                 if key and val: params[key] = val
 
     map_db = {
-        'generacja': 'Generacja', 'rok produkcji': 'Rok produkcji', 'przebieg': 'Przebieg',
+        'generacja': 'generacja', 'wersja': 'wersja',
+        'rok produkcji': 'Rok produkcji', 'przebieg': 'Przebieg',
         'rodzaj paliwa': 'Rodzaj paliwa', 'pojemność silnika': 'Pojemność skokowa', 'moc': 'Moc',
         'nadwozie': 'Typ nadwozia', 'kolor': 'Rodzaj koloru', 'skrzynia biegów': 'Skrzynia biegów',
-        'typ napędu': 'Napęd', 'kraj pochodzenia': 'Kraj pochodzenia', 'numer rejestracyjny': 'Ma numer rejestracyjny'
+        'typ napędu': 'naped', 'kraj pochodzenia': 'Kraj pochodzenia', 'numer rejestracyjny': 'Ma numer rejestracyjny'
     }
     
     for k_site, k_db in map_db.items():
-        if k_site in params: details[k_db] = params[k_site]
+        if k_site in params and not details.get(k_db):
+            details[k_db] = params[k_site]
 
-    # Rejestracja
     if 'Zarejestrowany w Polsce' not in details and details.get('Ma numer rejestracyjny'):
         details['Zarejestrowany w Polsce'] = 'Tak'
 
-    # Lokalizacja
-    try:
-        if 'lokalizacja' in params:
-            loc_parts = params['lokalizacja'].split(',')
-            details['Miasto'] = loc_parts[0].strip()
-            if len(loc_parts) > 1: details['Wojewodztwo'] = loc_parts[1].strip()
-    except: pass
+    # --- LOKALIZACJA ---
+    city_node = soup.find(class_=re.compile("location__main"))
+    region_node = soup.find(class_=re.compile("location__secondary"))
 
-    # Sprzedawca
+    if city_node: details['Miasto'] = city_node.get_text(strip=True)
+    if region_node: details['Wojewodztwo'] = region_node.get_text(strip=True)
+
+    if not details['Miasto']:
+        try:
+            loc_node = soup.find(class_=re.compile("seller-location__address"))
+            if loc_node:
+                raw_loc = loc_node.get_text(strip=True)
+                city_match = re.match(r"([^\d]+)", raw_loc)
+                if city_match: details['Miasto'] = city_match.group(1).strip().replace(',', '')
+        except: pass
+
     if "firma" in soup.get_text().lower() or "dealer" in soup.get_text().lower(): 
         details['Typ_Sprzedawcy'] = "Dealer"
 
-    # Wyposażenie
-    keywords = ["Klimatyzacja", "Skóra", "Nawigacja", "LED", "Kamera", "Czujniki", "Tempomat", "Automat", "Panorama", "Hak", "Bluetooth", "Winda", "Webasto"]
-    found_opts = [k for k in keywords if k in soup.get_text()]
-    details['Wyposazenie'] = ", ".join(found_opts)
-    details['Liczba_Opcji'] = len(found_opts)
+    # --- ZDJĘCIA ---
+    img_count = 0
+    try:
+        page_text = soup.get_text()
+        counter_match = re.search(r'1\s*/\s*(\d{1,3})', page_text)
+        if counter_match: img_count = int(counter_match.group(1))
+    except: pass
 
-    # Opis
-    paragraphs = soup.find_all('p')
-    if paragraphs:
-        longest_p = max(paragraphs, key=lambda p: len(p.get_text()), default=None)
-        if longest_p and len(longest_p.get_text()) > 50:
-            details['Opis'] = longest_p.get_text(strip=True)[:5000]
+    if img_count == 0:
+        slider = soup.find(class_=re.compile("slider|gallery"))
+        if slider:
+            slides = slider.find_all(recursive=False)
+            if len(slides) > 1: img_count = len(slides)
 
-    # Zdjęcia
-    imgs = soup.find_all('img') 
-    real_imgs = [i for i in imgs if int(i.get('width', 0) or 0) > 300]
-    details['Liczba_Zdjec'] = len(real_imgs)
+    if img_count == 0:
+        imgs = soup.find_all('img')
+        real_imgs = [i for i in imgs if int(i.get('width', 0) or 0) > 300]
+        img_count = len(real_imgs)
+    
+    details['Liczba_Zdjec'] = img_count
+
+    # --- GENERACJA (Breadcrumbs) ---
+    if not details.get('generacja'):
+        try:
+            url_marka, url_model = parse_brand_model_from_url(url)
+            if url_marka and url_model:
+                curr_marka = url_marka.lower().replace(" ", "-")
+                curr_model = url_model.lower().replace(" ", "-")
+                found_gen = None
+                for a in soup.find_all('a', href=True):
+                    href = a['href']
+                    if '/oferty/' in href and curr_marka in href and curr_model in href:
+                        parts = href.split('/')
+                        if len(parts) >= 6:
+                            candidate = parts[-1].split('?')[0]
+                            if 0 < len(candidate) < 15 and '=' not in candidate:
+                                found_gen = candidate.upper()
+                                break
+                if found_gen: details['generacja'] = found_gen
+        except: pass
 
     return details
 
 def run_autoplac_scraper(driver, db, stats, marka, model_slug, model_nazwa, kategoria_url="samochody-osobowe", rok_od=None):
     if rok_od is None: rok_od = ROK_OD_DOSTAWCZE
-    
     damage_param = "&damagedVehicles=false" if TYLKO_NIEUSZKODZONE else ""
-    
-    # URL jest teraz budowany poprawnie z parametru kategoria_url
     url = f"https://autoplac.pl/oferty/{kategoria_url}/{marka}/{model_slug}?yearFrom={rok_od}{damage_param}&order=1"
     
     log.info(f"Autoplac start [{kategoria_url}]: {marka} {model_nazwa}")
     page = 1
-    
-    # Ustawienie kategorii dla bazy
     db_kategoria = "osobowe" if "osobowe" in kategoria_url else "dostawcze"
     
     while True:
@@ -188,25 +202,18 @@ def run_autoplac_scraper(driver, db, stats, marka, model_slug, model_nazwa, kate
             full_url = f"{url}&p={page}"
             driver.get(full_url)
             close_cookies(driver)
-            # Czekamy aż pojawi się jakakolwiek oferta lub komunikat o braku
             WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
         except TimeoutException:
             log.warning("Autoplac timeout.")
             break
             
-        # Pobieramy linki z filtrowaniem marki
         links = extract_links(driver, marka)
-        
         if not links:
-            # Przewijamy, może leniwe ładowanie
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             time.sleep(2)
             links = extract_links(driver, marka)
-            
-            if not links:
-                log.info(f"Brak (więcej) ofert dla {model_nazwa} na stronie {page}.")
-                break
-            
+            if not links: break
+        
         log.info(f"Znaleziono {len(links)} pasujących ofert na stronie {page}.")
             
         for link in links:
@@ -214,33 +221,47 @@ def run_autoplac_scraper(driver, db, stats, marka, model_slug, model_nazwa, kate
             try: WebDriverWait(driver, 3).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
             except: pass
             
-            # Pobieranie danych
             d = parse_details(driver, link)
             url_marka, url_model = parse_brand_model_from_url(link)
             
+            # --- DEBUGOWANIE BŁĘDÓW ---
             if not d.get('Cena'): 
+                log.warning(f"❌ POMINIĘTO (Brak ceny): {link}")
                 stats.add_error()
                 continue
             
-            # Priorytetyzacja danych:
+            # Weryfikacja marki w URL (zabezpieczenie przed śmieciami)
+            marka_slug_safe = marka.lower().split()[0]
+            if marka_slug_safe not in link.lower():
+                 log.warning(f"❌ POMINIĘTO (Inna marka): {link}")
+                 continue
+
             final_marka = url_marka if url_marka else (d.get('Marka pojazdu') or marka.capitalize())
             final_model = url_model if url_model else (d.get('Model pojazdu') or model_nazwa)
             tytul = d.get('Tytul_H1') or f"{final_marka} {final_model}"
+
+            final_gen = d.get('generacja')
+            final_rok = clean_int(d.get('Rok produkcji'))
+            
+            if not final_gen and final_rok:
+                mapped_gen = get_generation_by_year(final_marka, final_model, final_rok)
+                if mapped_gen:
+                    final_gen = mapped_gen
 
             db_data = {
                 'url': link, 'platforma': 'autoplac', 'kategoria': db_kategoria,
                 'tytul': tytul.strip(),
                 'cena': d.get('Cena'), 'zrodlo_aktualizacja': d.get('Data_Aktualizacji'),
-                'marka': final_marka, 
-                'model': final_model,
-                'generacja': d.get('Generacja'),
-                'rocznik': clean_int(d.get('Rok produkcji')),
+                'marka': final_marka, 'model': final_model,
+                'generacja': final_gen,
+                'wersja': d.get('wersja'),
+                'rocznik': final_rok,
                 'przebieg': clean_int(d.get('Przebieg')),
                 'paliwo': d.get('Rodzaj paliwa'),
                 'pojemnosc': clean_int(d.get('Pojemność skokowa')),
                 'moc': clean_int(d.get('Moc')),
                 'nadwozie': d.get('Typ nadwozia'), 'kolor': d.get('Rodzaj koloru'),
-                'skrzynia': d.get('Skrzynia biegów'), 'naped': d.get('Napęd'),
+                'skrzynia': d.get('Skrzynia biegów'), 'naped': d.get('naped'),
                 'kraj': d.get('Kraj pochodzenia'),
                 'zarejestrowany': d.get('Zarejestrowany w Polsce'),
                 'nr_rejestracyjny': d.get('Ma numer rejestracyjny'),
@@ -256,13 +277,12 @@ def run_autoplac_scraper(driver, db, stats, marka, model_slug, model_nazwa, kate
             
             if status == "INSERT":
                 stats.add_new()
-                log.info(f"New: {db_data['cena']} PLN | {db_data['marka']} {db_data['model']}")
-            elif status == "UPDATE_PRICE":
+                log.info(f"✅ New: {db_data['cena']} PLN | {db_data['miasto']} | {db_data['generacja']}")
+            elif status != "SEEN":
                 stats.add_price_change()
-                log.info(f"Price update: {db_data['cena']} PLN")
+                log.info(f"🔄 Update: {db_data['cena']} PLN")
             elif status == "SEEN":
                 stats.add_seen() 
             
             stats.add_processed()
-            
         page += 1

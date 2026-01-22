@@ -1,0 +1,22 @@
+(function() {
+    console.clear();
+    console.log("%c 📦 CAŁA ZAWARTOŚĆ JSON OTOMOTO ", "background: #e30000; color: white; font-size: 16px; padding: 5px;");
+    
+    try {
+        const raw = document.getElementById('__NEXT_DATA__').innerText;
+        const json = JSON.parse(raw);
+        const advert = json?.props?.pageProps?.advert;
+
+        if(advert) {
+            console.log("Znaleziono obiekt oferty. Rozwiń go poniżej:");
+            console.dir(advert); // console.dir pozwala klikać i rozwijać obiekty
+            
+            console.log("%c 🔑 Parametry (details):", "color: blue;");
+            console.table(advert.details); // Wyświetli parametry w tabelce
+        } else {
+            console.log("Nie znaleziono danych oferty w __NEXT_DATA__.");
+        }
+    } catch (e) {
+        console.error("Błąd parsowania:", e);
+    }
+})();
