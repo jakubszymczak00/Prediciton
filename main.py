@@ -3,14 +3,12 @@ import sys
 import time
 import os
 
-# Importy konfiguracji i narzedzi
 from utils.config import SAMOCHODY, DOSTAWCZE, ROK_OD_OSOBOWE, ROK_OD_DOSTAWCZE
-from utils.drivers import init_driver # Zakładam, że masz ten plik
+from utils.drivers import init_driver
 from utils.logger import log 
 from utils.stats import SessionStats 
-from db_manager import BazaDanych # Zakładam, że masz ten plik
+from db_manager import BazaDanych
 
-# Importy scraperow (TE NOWE, POPRAWIONE)
 from scrapers.otomoto import run_otomoto_scraper
 from scrapers.autoplac import run_autoplac_scraper
 
@@ -18,42 +16,34 @@ def clear_console():
     os.system('cls' if os.name == 'nt' else 'clear')
 
 def interactive_menu():
-    """
-    Interaktywne menu wyboru kategorii, marki, modelu i platformy.
-    """
     clear_console()
-    print("==========================================")
-    print("   MEGA SCRAPER - DANIEL V2 (PREDYKCJA)   ")
-    print("==========================================")
+    print("Scraper - Szymczak")
     
-    # --- KROK 1: Wybor kategorii ---
+
     print("\nWybierz kategorie pojazdow:")
     print(f"[1] Samochody Osobowe   (od rocznika {ROK_OD_OSOBOWE})")
     print(f"[2] Samochody Dostawcze (od rocznika {ROK_OD_DOSTAWCZE})")
     
     cat_choice = input("\nWybor (domyslnie 1): ")
-    
-    # Domyslne ustawienia (Osobowe)
+
     baza_modeli = SAMOCHODY
-    oto_cat = "osobowe"              # slug dla Otomoto
-    auto_cat = "samochody-osobowe"   # slug dla Autoplac
+    oto_cat = "osobowe"              
+    auto_cat = "samochody-osobowe"   
     wybrany_rok = ROK_OD_OSOBOWE
     typ_nazwa = "OSOBOWE"
     
-    # Nadpisanie jesli wybrano Dostawcze
     if cat_choice == '2':
         baza_modeli = DOSTAWCZE
         oto_cat = "dostawcze"        
-        auto_cat = "samochody-dostawcze" # Poprawny slug dla Autoplac
+        auto_cat = "samochody-dostawcze" 
         wybrany_rok = ROK_OD_DOSTAWCZE
         typ_nazwa = "DOSTAWCZE"
-        print(f"\n--- Tryb: {typ_nazwa} ---")
+        print(f"\nTryb: {typ_nazwa}")
     else:
-        print(f"\n--- Tryb: {typ_nazwa} ---")
+        print(f"\nTryb: {typ_nazwa}")
 
-    # --- KROK 2: Wybor marki ---
     print("\nDostepne marki:")
-    # Sortowanie kluczy numerycznie
+    
     sorted_brands = sorted(baza_modeli.items(), key=lambda x: int(x[0]))
     
     for k, v in sorted_brands:
@@ -66,7 +56,7 @@ def interactive_menu():
 
     selected_brand = baza_modeli[brand_id]
     
-    # --- KROK 3: Wybor modelu ---
+
     print(f"\nWybrano marke: {selected_brand['nazwa']}")
     print("Dostepne modele:")
     print("[0] WSZYSTKIE MODELE")
@@ -86,9 +76,8 @@ def interactive_menu():
         print("Blad: Niepoprawny numer modelu.")
         return None
 
-    # --- KROK 4: Wybor platformy ---
     print("\n--- Wybierz platforme ---")
-    print("[1] Otomoto + Autoplac (Zalecane)")
+    print("[1] Otomoto + Autoplac ")
     print("[2] Tylko Otomoto")
     print("[3] Tylko Autoplac")
     
@@ -120,9 +109,9 @@ def main():
 
     try:
         for model_data in models_to_scrape:
-            log.info(f"--- Przetwarzanie modelu: {marka_nazwa} {model_data['nazwa']} ---")
+            log.info(f"Przetwarzanie modelu: {marka_nazwa} {model_data['nazwa']}")
             
-            # --- AUTOPLAC ---
+            # AUTOPLAC 
             if site_mode in ['autoplac', 'all']:
                 slug = model_data.get('slug_auto')
                 if slug:
@@ -139,7 +128,7 @@ def main():
                 else:
                     log.warning(f"Brak sluga Autoplac dla {model_data['nazwa']}")
 
-            # --- OTOMOTO ---
+            # OTOMOTO
             if site_mode in ['otomoto', 'all']:
                 slug = model_data.get('slug_oto')
                 if slug:
@@ -156,8 +145,8 @@ def main():
                 else:
                     log.warning(f"Brak sluga Otomoto dla {model_data['nazwa']}")
 
-        # --- FINALIZACJA ---
-        log.info("--- Zakonczono pobieranie. Weryfikacja aktywnosci ofert ---")
+        
+        log.info("Zakonczono pobieranie. Weryfikacja aktywnosci ofert")
         zamkniete = db.oznacz_zakonczone_oferty()
         log.info(f"Zaktualizowano status {zamkniete} ofert na 'zakonczone'.")
 

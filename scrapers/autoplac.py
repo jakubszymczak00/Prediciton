@@ -32,7 +32,6 @@ def close_cookies(driver):
 def extract_links(driver, szukana_marka):
     soup = BeautifulSoup(driver.page_source, 'html.parser')
     links = set()
-    # Uproszczenie: szukamy po prostu linków ofertowych, filtr marki zrobimy później
     
     for a in soup.find_all('a', href=True):
         href = a['href']
@@ -125,7 +124,7 @@ def parse_details(driver, url):
     if 'Zarejestrowany w Polsce' not in details and details.get('Ma numer rejestracyjny'):
         details['Zarejestrowany w Polsce'] = 'Tak'
 
-    # --- LOKALIZACJA ---
+    #LOKALIZACJA
     city_node = soup.find(class_=re.compile("location__main"))
     region_node = soup.find(class_=re.compile("location__secondary"))
 
@@ -144,7 +143,7 @@ def parse_details(driver, url):
     if "firma" in soup.get_text().lower() or "dealer" in soup.get_text().lower(): 
         details['Typ_Sprzedawcy'] = "Dealer"
 
-    # --- ZDJĘCIA ---
+    #ZDJĘCIA
     img_count = 0
     try:
         page_text = soup.get_text()
@@ -165,7 +164,7 @@ def parse_details(driver, url):
     
     details['Liczba_Zdjec'] = img_count
 
-    # --- GENERACJA (Breadcrumbs) ---
+    #GENERACJA
     if not details.get('generacja'):
         try:
             url_marka, url_model = parse_brand_model_from_url(url)
@@ -224,16 +223,16 @@ def run_autoplac_scraper(driver, db, stats, marka, model_slug, model_nazwa, kate
             d = parse_details(driver, link)
             url_marka, url_model = parse_brand_model_from_url(link)
             
-            # --- DEBUGOWANIE BŁĘDÓW ---
+            #DEBUGOWANIE BŁĘDÓW
             if not d.get('Cena'): 
-                log.warning(f"❌ POMINIĘTO (Brak ceny): {link}")
+                log.warning(f"POMINIĘTO (Brak ceny): {link}")
                 stats.add_error()
                 continue
             
             # Weryfikacja marki w URL (zabezpieczenie przed śmieciami)
             marka_slug_safe = marka.lower().split()[0]
             if marka_slug_safe not in link.lower():
-                 log.warning(f"❌ POMINIĘTO (Inna marka): {link}")
+                 log.warning(f"POMINIĘTO (Inna marka): {link}")
                  continue
 
             final_marka = url_marka if url_marka else (d.get('Marka pojazdu') or marka.capitalize())
@@ -277,10 +276,10 @@ def run_autoplac_scraper(driver, db, stats, marka, model_slug, model_nazwa, kate
             
             if status == "INSERT":
                 stats.add_new()
-                log.info(f"✅ New: {db_data['cena']} PLN | {db_data['miasto']} | {db_data['generacja']}")
+                log.info(f"New: {db_data['cena']} PLN | {db_data['miasto']} | {db_data['generacja']}")
             elif status != "SEEN":
                 stats.add_price_change()
-                log.info(f"🔄 Update: {db_data['cena']} PLN")
+                log.info(f"Update: {db_data['cena']} PLN")
             elif status == "SEEN":
                 stats.add_seen() 
             

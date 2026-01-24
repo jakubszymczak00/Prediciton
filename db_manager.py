@@ -4,7 +4,6 @@ from datetime import datetime
 class BazaDanych:
     def __init__(self, nazwa_pliku="baza_pojazdow.db"):
         self.nazwa_pliku = nazwa_pliku
-        # Otwieramy połączenie RAZ i trzymamy je otwarte
         self.conn = sqlite3.connect(self.nazwa_pliku, check_same_thread=False)
         self.cursor = self.conn.cursor()
         self.stworz_tabele()
@@ -47,19 +46,17 @@ class BazaDanych:
             )
         ''')
         self.conn.commit()
-        # WAŻNE: Nie zamykamy tutaj połączenia!
 
     def upsert_oferta(self, dane):
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         status = "ERROR"
 
         try:
-            # Używamy self.cursor zamiast tworzyć nowy
             self.cursor.execute("SELECT id, cena FROM oferty WHERE url = ?", (dane['url'],))
             row = self.cursor.fetchone()
 
             if row is None:
-                # --- INSERT (Nowa oferta) ---
+                #INSERT (Nowa oferta)
                 self.cursor.execute('''
                     INSERT INTO oferty (
                         url, platforma, tytul, cena, przebieg, rocznik,
@@ -87,7 +84,7 @@ class BazaDanych:
                                   (new_id, dane.get('cena'), dane.get('przebieg'), now))
                 status = "INSERT"
             else:
-                # --- UPDATE (Istniejąca oferta) ---
+                #UPDATE (Istniejąca oferta)
                 db_id, old_cena = row
                 
                 # Zawsze odświeżamy last_seen
@@ -145,8 +142,8 @@ class BazaDanych:
         self.conn.commit()
         return count
 
-    # --- TEGO BRAKOWAŁO: ---
+
     def close(self):
-        """Bezpiecznie zamyka połączenie z bazą."""
+        #Bezpiecznie zamyka połączenie z bazą.
         if self.conn:
             self.conn.close()

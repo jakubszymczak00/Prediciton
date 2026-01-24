@@ -18,22 +18,17 @@ from utils.network import retry
 from utils.logger import log
 from utils.drivers import random_sleep 
 
-# --- FUNKCJE POMOCNICZE ---
-
 def check_ban_status(driver):
-    """
-    Sprawdza czy nie ma blokady, ale reaguje TYLKO na twarde błędy.
-    """
     try:
         title = driver.title.lower()
         if "429" in title or "too many requests" in driver.page_source.lower()[:200]:
-            log.critical("🚨 BŁĄD 429. Pauza 60s...")
+            log.critical("BŁĄD 429. Pauza 60s...")
             time.sleep(60)
             driver.refresh()
             time.sleep(5)
             return True
         if "just a moment" in title:
-            log.warning("🛡️ Captcha. Czekam 15s...")
+            log.warning("Captcha. Czekam 15s...")
             time.sleep(15)
     except: pass
     return False
@@ -50,13 +45,12 @@ def find_key_recursive(data, target_key):
             if res: return res
     return None
 
-# --- PARSERY (Twoje stare, sprawdzone funkcje) ---
 
 @retry(max_retries=3, delay=3)
 def extract_list_json(driver):
-    # Dodane: sprawdzenie bana
+
     if check_ban_status(driver): return []
-    random_sleep(2, 4)
+    random_sleep(1, 3)
 
     script = "try { return document.getElementById('__NEXT_DATA__').innerText; } catch(e) { return null; }"
     raw_json = driver.execute_script(script)
@@ -214,7 +208,7 @@ def extract_offer_page_data(driver):
         log.warning(f"HTML extract error: {e}")
         return details
 
-# --- PĘTLA GŁÓWNA ---
+
 
 def run_otomoto_scraper(driver, db, stats, marka, model_slug, model_nazwa, kategoria="osobowe", rok_od=None):
     if rok_od is None: rok_od = ROK_OD
@@ -227,14 +221,14 @@ def run_otomoto_scraper(driver, db, stats, marka, model_slug, model_nazwa, kateg
     while True:
         log.info(f"Otomoto page {page}...")
         
-        # --- Dodane: Przerwa co 10 stron (ważne dla 429) ---
+
         if page > 1 and page % 10 == 0:
-            log.info("☕ Przerwa anty-ban (30s)...")
+            log.info("Przerwa anty-ban (30s)...")
             time.sleep(30)
 
         try:
             driver.get(f"{base_url}&page={page}")
-            random_sleep(3, 5) # ZWOLNIENIE
+            random_sleep(1, 3) 
             WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "__NEXT_DATA__")))
         except TimeoutException: break
         
@@ -242,7 +236,7 @@ def run_otomoto_scraper(driver, db, stats, marka, model_slug, model_nazwa, kateg
         if not items:
             if check_ban_status(driver):
                 continue
-            break # Koniec ofert
+            break 
             
         for item in items:
             node = item.get('node') or item
@@ -264,13 +258,13 @@ def run_otomoto_scraper(driver, db, stats, marka, model_slug, model_nazwa, kateg
 
             status = db.upsert_oferta(db_data)
             
-            # Wchodzimy w ofertę, jeśli nowa, zmieniona cena, LUB jeśli to SEEN ale chcemy uzupełnić dane
+            
             if status in ["INSERT", "UPDATE_PRICE", "SEEN"]:
                 driver.get(link)
-                random_sleep(2, 4) # ZWOLNIENIE W OFERCIE
+                random_sleep(1, 2)
                 
                 try: 
-                    # WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+                    
                     full_details = extract_offer_page_data(driver)
                     
                     if full_details:
@@ -281,7 +275,6 @@ def run_otomoto_scraper(driver, db, stats, marka, model_slug, model_nazwa, kateg
                         for k, v in full_details.items():
                             if v: db_data[k] = v
                         
-                        # --- PLAN B: MAPPER ---
                         current_gen = db_data.get('generacja')
                         current_rok = clean_int(db_data.get('rocznik'))
                         
@@ -291,7 +284,7 @@ def run_otomoto_scraper(driver, db, stats, marka, model_slug, model_nazwa, kateg
                                 db_data['generacja'] = mapped_gen
 
                         db.upsert_oferta(db_data)
-                        log.info(f"✅ OK: {db_data.get('cena')} PLN | Gen: {db_data.get('generacja')} | Wer: {db_data.get('wersja')}")
+                        log.info(f"OK: {db_data.get('cena')} PLN | Gen: {db_data.get('generacja')} | Wer: {db_data.get('wersja')}")
                     
                 except Exception as e: log.warning(f"Blad detali: {e}")
                 

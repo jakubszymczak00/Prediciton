@@ -12,11 +12,10 @@ def retry(max_retries=3, delay=2):
                     return func(*args, **kwargs)
                 except Exception as e:
                     last_exception = e
-                    # Wypisujemy info o bledzie
+                    
                     print(f" [Blad sieci] Proba {attempt}/{max_retries}. Czekam {delay}s...")
                     time.sleep(delay)
             
-            # Jesli po wszystkich probach dalej blad
             print(f" [Krytyczny] Nie udalo sie pobrac danych: {last_exception}")
             return None
         return wrapper
